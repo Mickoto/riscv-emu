@@ -3,7 +3,7 @@ OBJS=$(patsubst src/%.cpp,build/%.o,$(SOURCES))
 TESTSRCS=$(wildcard test/*.c)
 TESTS=$(patsubst test/%.c,build/test/%,$(TESTSRCS))
 
-CFLAGS =-Wall -ggdb -Werror
+CFLAGS =-Wall -ggdb -Werror -std=c++23
 RISCVC =riscv32-unknown-elf-gcc
 TESTFLAGS=-march=rv32i -mabi=ilp32 -nostdlib -fno-builtin
 

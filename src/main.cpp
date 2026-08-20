@@ -5,8 +5,11 @@
 #include <ios>
 #include <iostream>
 #include <memory>
+#include <print>
 #include "instruction.h"
 #include "elf.h"
+#include "config.h"
+#include "cli.h"
 
 void usage() {
     // TODO:
@@ -155,17 +158,19 @@ void main_loop(PState &state) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        usage();
+    auto result = parse_argv(argc, argv);
+    if (!result) {
+        std::println("Error parsing parameters: {}", result.error());
         exit(1);
     }
+    std::string &filename = result.value();
 
     FlatMemoryModel memory(1 << 20);
     MemoryMappedIOModel m(&memory, std::cout, std::cin);
     PState s;
     s.memory = &m;
 
-    std::ifstream input(argv[1], std::ios::in | std::ios::binary);
+    std::ifstream input(filename, std::ios::in | std::ios::binary);
     load_file(input, &memory, s.registers);
 
     main_loop(s);
