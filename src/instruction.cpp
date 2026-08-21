@@ -221,6 +221,9 @@ void InstructionBranch::execute(PState &state) const {
             result = (int)state.registers.readRegister(rs1) < (int)state.registers.readRegister(rs2);
         }
     }
+    else {
+        result = state.registers.readRegister(rs1) == state.registers.readRegister(rs2);
+    }
     if (flags & 0b001) {
         result = !result;
     }

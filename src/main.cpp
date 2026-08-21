@@ -114,8 +114,7 @@ void load_file(std::ifstream &in, FlatMemoryModel *m, RegisterFile &r) {
 }
 
 void main_loop(PState &state) {
-    //while(1) {
-    for (int j = 0; j < 1000; j++) {
+    while(1) {
         uint32_t pc = state.registers.getPC();
         // Fetch
         if (pc % 4) {
@@ -123,9 +122,9 @@ void main_loop(PState &state) {
             // TODO: trap?
             break;
         }
-        // auto temp = state.memory->readWord(0x1018c);
-        // std::cout << decode(*reinterpret_cast<InstructionWord *>(&temp)).get() << std::endl;
         uint32_t ir = state.memory->readWord(pc);
+        state.registers.jumpPC(4);
+
         if ((ir & 0x3) != 0x3) {
             std::printf("Illegal instruction encountered! (detected by fetch : IP = 0x%x, IW = 0x%x)\n", pc, ir);
             // TODO: trap on sufficiently small ISAs
@@ -134,15 +133,16 @@ void main_loop(PState &state) {
 
         // Decode
         InstructionWord iw;
+        std::unique_ptr<Instruction> i;
         try {
             iw = *reinterpret_cast<InstructionWord *>(&ir);
+            i = decode(iw);
         }
         catch (const char *error) {
             // TODO: trap
             std::cerr << "Decoding error: " << error << "\n";
             break;
         }
-        std::unique_ptr<Instruction> i = decode(iw);
         if (!i) {
             std::printf("Illegal instruction encountered! (Opcode %x)\n", iw.opcode);
             // TODO: trap
@@ -150,10 +150,51 @@ void main_loop(PState &state) {
         }
 
         // Execute
-        // std::cout << i.get() << std::endl;
         i->execute(state);
+    }
+}
 
+void main_loop_interactive(PState &state) {
+    while(1) {
+        uint32_t pc = state.registers.getPC();
+        // Fetch
+        if (pc % 4) {
+            std::printf("Misaligned program counter! (PC = %x)\n", pc);
+            // TODO: trap?
+            break;
+        }
+        uint32_t ir = state.memory->readWord(pc);
         state.registers.jumpPC(4);
+
+        if ((ir & 0x3) != 0x3) {
+            std::printf("Illegal instruction encountered! (detected by fetch : IP = 0x%x, IW = 0x%x)\n", pc, ir);
+            // TODO: trap on sufficiently small ISAs
+            break;
+        }
+
+        // Decode
+        InstructionWord iw;
+        std::unique_ptr<Instruction> i;
+        try {
+            iw = *reinterpret_cast<InstructionWord *>(&ir);
+            i = decode(iw);
+        }
+        catch (const char *error) {
+            // TODO: trap
+            std::cerr << "Decoding error: " << error << "\n";
+            break;
+        }
+        if (!i) {
+            std::printf("Illegal instruction encountered! (Opcode %x)\n", iw.opcode);
+            // TODO: trap
+            break;
+        }
+
+        // Execute
+        std::cout << i.get() << std::endl;
+        i->execute(state);
+        state.registers.printRegisters(std::cout);
+        getchar();
     }
 }
 
@@ -172,8 +213,14 @@ int main(int argc, char *argv[]) {
 
     std::ifstream input(filename, std::ios::in | std::ios::binary);
     load_file(input, &memory, s.registers);
+    input.close();
 
-    main_loop(s);
+    if (g_config.interactive) {
+        main_loop_interactive(s);
+    }
+    else {
+        main_loop(s);
+    }
 
     return 0;
 }

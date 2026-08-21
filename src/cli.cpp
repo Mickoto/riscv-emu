@@ -1,12 +1,18 @@
 #include "cli.h"
 #include "config.h"
-#include <cstdint>
 #include <expected>
 #include <format>
-#include <set>
+#include <functional>
+#include <map>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
+
+Config g_config = {
+    .isa = RV32I,
+    .interactive = false,
+};
 
 struct ShortSwitch {
     char s;
@@ -21,33 +27,40 @@ struct Literal {
 };
 
 using Option = std::variant<ShortSwitch, LongSwitch, Literal>;
+using MaybeError = std::optional<std::string>;
 
-template<class... Ts>
-struct overloads : Ts... { using Ts::operator()...; };
+struct OptionInfo {
+    int argnum;
+    std::function<MaybeError(std::vector<std::string> &)> effect;
+};
 
-uint16_t parse_isa(const std::string &isa) {
-    uint16_t ret = 0;
-    for (size_t i = 0; i < isa.size(); i++) {
-        switch (isa[i]) {
+std::function<MaybeError(std::vector<std::string> &)> d_effect = [](auto &a) { g_config.interactive = true; return std::nullopt; };
+MaybeError isa_effect(std::vector<std::string> &args) {
+    g_config.isa = 0;
+    std::string &isa_string = args.front();
+    for (size_t i = 0; i < isa_string.size(); i++) {
+        switch (isa_string[i]) {
             case 'i':
             case 'I':
-                ret |= RV32I;
+                g_config.isa |= RV32I;
                 break;
             case 'm':
             case 'M':
-                ret |= RV32M;
+                g_config.isa |= RV32M;
                 break;
             case 'f':
             case 'F':
-                ret |= RV32F;
+                g_config.isa |= RV32F;
                 break;
             case 'e':
             case 'E':
-                ret |= RV32E;
+                g_config.isa |= RV32E;
                 break;
+            default:
+                return std::format("unknown isa extension {}!", isa_string[i]);
         }
     }
-    return ret;
+    return std::nullopt;
 }
 
 std::vector<Option> lex_argv(int argc, char **argv) {
@@ -75,10 +88,18 @@ std::vector<Option> lex_argv(int argc, char **argv) {
     return ret;
 }
 
-std::expected<std::string, std::string> parse_argv(int argc, char **argv) {
-    static const std::set<char> argumented_short = {'d'};
-    static const std::set<std::string> argumented_long = {};
+const std::map<char, OptionInfo> short_switches = {
+    { 'd', { .argnum = 0, .effect = d_effect } },
+};
 
+const std::map<std::string, OptionInfo> long_switches = {
+    { "isa", { .argnum = 1, .effect = isa_effect } },
+};
+
+template<class... Ts>
+struct overloads : Ts... { using Ts::operator()...; };
+
+std::expected<std::string, std::string> parse_argv(int argc, char **argv) {
     std::vector<Option> options = lex_argv(argc, argv);
     std::expected<std::string, std::string> ret;
     bool filename = false;
@@ -86,45 +107,45 @@ std::expected<std::string, std::string> parse_argv(int argc, char **argv) {
     for (size_t i = 0; i < options.size(); i++) {
         std::visit( overloads {
             [&options, &i, &ret](ShortSwitch& s) {
-                // Unargumented switches
-                switch (s.s) {
-                    case 'd':
-                        g_config.interactive = true;
-                        return;
-                }
-                // Argumented switches
-                if (!argumented_short.contains(s.s)) {
+                if (!short_switches.contains(s.s)) {
                     ret = std::unexpected(std::format("option -{} not recognized!", s.s));
                     return;
                 }
-                i++;
-                if (i >= options.size() || !std::holds_alternative<Literal>(options[i])) {
-                    ret = std::unexpected(std::format("-{} expects an argument!", s.s));
-                    return;
+                int argnum = short_switches.at(s.s).argnum;
+                std::vector<std::string> arguments;
+                for (int j = 0; j < argnum; j++) {
+                    i++;
+                    if (i >= options.size() || !std::holds_alternative<Literal>(options[i])) {
+                        ret = std::unexpected(std::format("-{} expects {} arguments, given {}!", s.s, argnum, j));
+                        return;
+                    }
+                    arguments.push_back(std::get<Literal>(options[i]).value);
                 }
-                std::string argument = std::get<Literal>(options[i]).value;
-                switch (s.s) {
-
+                auto result = short_switches.at(s.s).effect(arguments);
+                if (result) {
+                    ret = std::unexpected(result.value());
                 }
             },
             [&options, &i, &ret](LongSwitch& s) {
-                // Unargumented switches
-                // Argumented switches
-                if (!argumented_long.contains(s.s)) {
+                if (!long_switches.contains(s.s)) {
                     ret = std::unexpected(std::format("option --{} not recognized!", s.s));
                     return;
                 }
-                i++;
-                if (i >= options.size() || !std::holds_alternative<Literal>(options[i])) {
-                    ret = std::unexpected(std::format("--{} expects an argument!", s.s));
-                    return;
+                int argnum = long_switches.at(s.s).argnum;
+                std::vector<std::string> arguments;
+                for (int j = 0; j < argnum; j++) {
+                    i++;
+                    if (i >= options.size() || !std::holds_alternative<Literal>(options[i])) {
+                        ret = std::unexpected(std::format("--{} expects {} arguments, given {}!", s.s, argnum, j));
+                        return;
+                    }
+                    arguments.push_back(std::get<Literal>(options[i]).value);
                 }
-                std::string argument = std::get<Literal>(options[i]).value;
-                if (s.s == "isa") {
-                    g_config.isa = parse_isa(argument);
+                auto &effect = long_switches.at(s.s).effect;
+                auto result = effect(arguments);
+                if (result) {
+                    ret = std::unexpected(result.value());
                 }
-                ret = std::unexpected(std::format("--{} not recognized!", s.s));
-                return;
             },
             [&filename, &ret](Literal& s) {
                 if (!filename) {

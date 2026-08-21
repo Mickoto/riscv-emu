@@ -12,7 +12,9 @@ struct PState {
 class Instruction {
 public:
     virtual void print(std::ostream& out) const = 0;
-    virtual void execute(PState &state) const= 0;
+    virtual void execute(PState &state) const = 0;
+
+    virtual ~Instruction() = default;
 };
 
 std::ostream &operator<<(std::ostream &os, Instruction *i);
